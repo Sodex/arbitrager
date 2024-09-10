@@ -1,27 +1,13 @@
 import asyncio
+import aioredis
 import websockets
 import json
 
-
-
-spot_balance = 150 # in $
-btcusd_ask = 0
-btcrub_bid = 0
-usdrub_ask = 70.850
-fee = 0.002
-
-
-def calculate_arbitrage_opportunity():
-	try:
-		btc = spot_balance / btcusd_ask - (spot_balance / btcusd_ask) * fee
-		rub = btc * btcrub_bid - (btc * btcrub_bid) * fee
-		usd = rub / usdrub_ask - (rub / usdrub_ask) * fee
-	except ZeroDivisionError:
-		return 0
-	else:
-		return usd - spot_balance
-
-async def subscribe(websocket, channel='btcusdt@bookTicker'):
+# to do: ping-pong and ipc
+ 
+async def subscribe(websocket, symbol, depth):
+    # example: symbol='btcusdt', depth=10 ===> channel='btcusdt@depth10'
+    channel = symbol + '@depth' + str(depth)
     payload = {'method': 'SUBSCRIBE',
                'params': [channel],
                'id': 4815162342}
@@ -29,37 +15,30 @@ async def subscribe(websocket, channel='btcusdt@bookTicker'):
     seried_payload = json.dumps(payload)
     await websocket.send(seried_payload)
     await websocket.recv()
+    return websocket
 
-async def updates_handler(websocket):
-    global btcusd_ask
-    global btcrub_bid
-    global usdrub_ask
+
+async def run_orderbook_stream(endpoint_url, symbol, depth):
+    websocket = await websockets.connect(endpoint_url)
+    websocket = await subscribe(websocket=websocket, symbol=symbol, depth=depth)
+    redis_connection = await aioredis.create_redis(('localhost', 6379))
 
     while True:
         data = await websocket.recv()
-        data = json.loads(data)
+        await redis_connection.publish_json(symbol, data)
 
-        if data["s"] == 'BTCUSDT':
-        	btcusd_ask = float(data["a"])
-        elif data["s"] == 'BTCRUB':
-        	btcrub_bid = float(data["b"])
-        elif data["s"] == 'USDTRUB':
-        	usdrub_ask = float(data["a"])
 
-        result = calculate_arbitrage_opportunity()
-        print(f'[ARBITRAGE_PROFIT] ${result:.2f} [TICKER] {data["s"]} [BEST_BID] {float(data["b"]):.2f} [BEST_ASK] {float(data["a"]):.2f}')
+async def run_orderbooks_streams(*args, **kwargs):
+    tasks = []
+    for symbol in args:
+        endpoint_url = kwargs["endpoint_url"]
+        depth = kwargs["depth"]
+        task = asyncio.create_task(run_orderbook_stream(endpoint_url=endpoint_url, symbol=symbol, depth=depth))
+        tasks.append(task)
 
-async def task(channel):
-    websocket = await websockets.connect('wss://stream.binance.com:9443/ws')
-    # подписываемся на обновления определенного канала
-    await subscribe(websocket, channel)
-    await updates_handler(websocket)
+    await asyncio.gather(*tasks)
 
-async def main():
-    await asyncio.gather(task('btcusdt@bookTicker'), task('btcrub@bookTicker'), task('usdtrub@bookTicker'))
 
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+def init(*args, **kwargs):
+    # creates event loop
+    asyncio.run(run_orderbooks_streams(*args, **kwargs))
