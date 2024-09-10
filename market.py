@@ -10,7 +10,7 @@ async def subscribe(websocket, symbol, depth):
     channel = symbol + '@depth' + str(depth)
     payload = {'method': 'SUBSCRIBE',
                'params': [channel],
-               'id': 4815162342}
+               'id': 4815155542}
 
     seried_payload = json.dumps(payload)
     await websocket.send(seried_payload)
