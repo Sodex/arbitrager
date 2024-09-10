@@ -2,6 +2,8 @@ import asyncio
 import aioredis
 import json
 
+# todo: rewrite using multithreading since async approach is useless for cpu-bound operations
+
 
 async def run_strategy(symbol, redis_connection):
     channel = (await redis_connection.subscribe(symbol))[0]
